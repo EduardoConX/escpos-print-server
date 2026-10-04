@@ -28,12 +28,43 @@ type Body struct {
 var printMu sync.Mutex
 
 func main() {
+	configureLogging()
+	port := getEnv("PORT", "8080")
+	printerPath := getEnv("PRINTER_PATH", "")
+
+	if printerPath != "" {
+		log.Printf("printer path configured: %s", printerPath)
+	}
+
 	http.HandleFunc("/", handler)
 
-	fmt.Printf("Starting server...\n")
-	if err := http.ListenAndServe(":8080", nil); err != nil {
+	fmt.Printf("Starting server on port %s...\n", port)
+	if err := http.ListenAndServe(":"+port, nil); err != nil {
 		log.Fatal(err)
 	}
+}
+
+func configureLogging() {
+	log.SetFlags(log.LstdFlags | log.Lshortfile)
+	level := strings.ToLower(getEnv("LOG_LEVEL", "info"))
+	if level == "debug" {
+		log.Printf("logging configured at debug level")
+	}
+}
+
+func getEnv(key, fallback string) string {
+	if value := strings.TrimSpace(os.Getenv(key)); value != "" {
+		return value
+	}
+	return fallback
+}
+
+func resolvePrinterDestination(requestPrinter string) string {
+	configuredPrinter := strings.TrimSpace(getEnv("PRINTER_PATH", ""))
+	if strings.TrimSpace(requestPrinter) != "" {
+		return requestPrinter
+	}
+	return configuredPrinter
 }
 
 func handler(w http.ResponseWriter, r *http.Request) {
@@ -62,7 +93,13 @@ func handler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := print(body.Operations, body.Printer); err != nil {
+	printerPath := resolvePrinterDestination(body.Printer)
+	if strings.TrimSpace(printerPath) == "" {
+		writeJSONError(w, http.StatusBadRequest, "printer is required")
+		return
+	}
+
+	if err := print(body.Operations, printerPath); err != nil {
 		log.Printf("print error: %v", err)
 		writeJSONError(w, http.StatusInternalServerError, "print failed")
 		return
@@ -82,12 +119,9 @@ func writeJSONResponse(w http.ResponseWriter, status int, payload map[string]str
 }
 
 func validateBody(b Body) error {
-    if strings.TrimSpace(b.Printer) == "" {
-        return fmt.Errorf("printer is required")
-    }
-    if len(b.Operations) == 0 {
-        return fmt.Errorf("operations are required")
-    }
+	if len(b.Operations) == 0 {
+		return fmt.Errorf("operations are required")
+	}
 
     for _, op := range b.Operations {
         if strings.TrimSpace(op.Action) == "" {
