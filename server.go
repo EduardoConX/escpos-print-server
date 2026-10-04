@@ -45,16 +45,16 @@ func (server *printServer) handlePrint(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	printerPath := strings.TrimSpace(body.Printer)
-	if printerPath == "" {
-		printerPath = server.config.PrinterPath
+	printerName := strings.TrimSpace(body.Printer)
+	if printerName == "" {
+		printerName = server.config.PrinterName
 	}
-	if printerPath == "" {
+	if printerName == "" {
 		writeJSONError(w, http.StatusBadRequest, "printer is required")
 		return
 	}
 
-	if err := print(body.Operations, printerPath); err != nil {
+	if err := print(body.Operations, printerName); err != nil {
 		log.Printf("print error: %v", err)
 		writeJSONError(w, http.StatusInternalServerError, "print failed")
 		return

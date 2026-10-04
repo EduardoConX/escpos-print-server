@@ -9,14 +9,14 @@ import (
 
 type Config struct {
 	Port        string
-	PrinterPath string
+	PrinterName string
 	LogLevel    string
 }
 
 func loadConfig() (Config, error) {
 	config := Config{
 		Port:        getEnv("PORT", "8080"),
-		PrinterPath: getEnv("PRINTER_PATH", ""),
+		PrinterName: getEnv("PRINTER_NAME", "XP-58"),
 		LogLevel:    strings.ToLower(getEnv("LOG_LEVEL", "info")),
 	}
 

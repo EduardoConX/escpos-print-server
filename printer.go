@@ -2,9 +2,8 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"fmt"
-	"io"
-	"os"
 	"strconv"
 	"strings"
 
@@ -13,14 +12,8 @@ import (
 
 func print(operations []Operation, printer string) error {
 	return printerQueue.run(func() error {
-		tempFile, err := os.CreateTemp("", "escpos-*.tmp")
-		if err != nil {
-			return err
-		}
-		defer os.Remove(tempFile.Name())
-		defer tempFile.Close()
-
-		writer := bufio.NewWriter(tempFile)
+		var output bytes.Buffer
+		writer := bufio.NewWriter(&output)
 		if _, err := writer.Write(startPrinter()); err != nil {
 			return err
 		}
@@ -36,10 +29,7 @@ func print(operations []Operation, printer string) error {
 		if err := writer.Flush(); err != nil {
 			return err
 		}
-		if err := tempFile.Close(); err != nil {
-			return err
-		}
-		return copyToPrinter(tempFile.Name(), printer)
+		return sendToPrinter(printer, output.Bytes())
 	})
 }
 
@@ -150,21 +140,4 @@ func feed(lines string) ([]byte, error) {
 
 func enter() []byte {
 	return []byte("\n")
-}
-
-func copyToPrinter(source, destination string) error {
-	sourceFile, err := os.Open(source)
-	if err != nil {
-		return err
-	}
-	defer sourceFile.Close()
-
-	destinationFile, err := os.OpenFile(destination, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
-	if err != nil {
-		return err
-	}
-	defer destinationFile.Close()
-
-	_, err = io.Copy(destinationFile, sourceFile)
-	return err
 }
