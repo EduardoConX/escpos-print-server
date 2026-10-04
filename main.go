@@ -35,19 +35,87 @@ func main() {
 
 func handler(w http.ResponseWriter, r *http.Request) {
 	configCORS(&w, r)
-	if (*r).Method == "OPTIONS" {
+
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusOK)
 		return
 	}
 
-	if r.Method == "POST" {
-		decoder := json.NewDecoder(r.Body)
-		var b Body
-		err := decoder.Decode(&b)
-		if err != nil {
-			panic(err)
-		}
-		print(b.Operations, b.Printer)
+	if r.Method != http.MethodPost {
+		writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
 	}
+
+	var body Body
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		log.Printf("invalid JSON: %v", err)
+		writeJSONError(w, http.StatusBadRequest, "invalid payload")
+		return
+	}
+
+	if err := validateBody(body); err != nil {
+		log.Printf("validation error: %v", err)
+		writeJSONError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	if err := print(body.Operations, body.Printer); err != nil {
+		log.Printf("print error: %v", err)
+		writeJSONError(w, http.StatusInternalServerError, "print failed")
+		return
+	}
+
+	writeJSONResponse(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func writeJSONError(w http.ResponseWriter, status int, msg string) {
+	writeJSONResponse(w, status, map[string]string{"error": msg})
+}
+
+func writeJSONResponse(w http.ResponseWriter, status int, payload map[string]string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	json.NewEncoder(w).Encode(payload)
+}
+
+func validateBody(b Body) error {
+    if strings.TrimSpace(b.Printer) == "" {
+        return fmt.Errorf("printer is required")
+    }
+    if len(b.Operations) == 0 {
+        return fmt.Errorf("operations are required")
+    }
+
+    for _, op := range b.Operations {
+        if strings.TrimSpace(op.Action) == "" {
+            return fmt.Errorf("operation action is required")
+        }
+        switch op.Action {
+        case "fontSize":
+            if strings.TrimSpace(op.Data) == "" {
+                return fmt.Errorf("fontSize data is required")
+            }
+        case "alignment":
+            if op.Data != "L" && op.Data != "C" && op.Data != "R" {
+                return fmt.Errorf("alignment must be L, C or R")
+            }
+        case "text":
+            // valid as long as data is present
+        case "boldText":
+            if _, err := strconv.Atoi(op.Data); err != nil {
+                return fmt.Errorf("boldText data must be numeric")
+            }
+        case "feed":
+            if _, err := strconv.Atoi(op.Data); err != nil {
+                return fmt.Errorf("feed data must be numeric")
+            }
+        case "enter":
+        default:
+            return fmt.Errorf("unsupported action: %s", op.Action)
+        }
+    }
+
+    return nil
 }
 
 func configCORS(w *http.ResponseWriter, r *http.Request) {
@@ -56,30 +124,41 @@ func configCORS(w *http.ResponseWriter, r *http.Request) {
 	(*w).Header().Set("Access-Control-Allow-Headers", "Accept, Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization")
 }
 
-func print(operations []Operation, printer string) {
-	fileName := "printFile"
-	//Create file to print
-	f, err := os.Create(fileName)
+func print(operations []Operation, printer string) error {
+    tempFile, err := os.CreateTemp("", "escpos-*.tmp")
+    if err != nil {
+        return err
+    }
+    defer os.Remove(tempFile.Name())
+    defer tempFile.Close()
 
-	if err != nil {
-		panic(err)
-	}
+    writer := bufio.NewWriter(tempFile)
+    if _, err := writer.Write(startPrinter()); err != nil {
+        return err
+    }
 
-	//Close file after creation
-	defer f.Close()
+    for _, operation := range operations {
+        data, err := operationsHandler(operation)
+        if err != nil {
+            return err
+        }
+        if _, err := writer.Write(data); err != nil {
+            return err
+        }
+    }
 
-	w := bufio.NewWriter(f)
-	w.Write(startPrinter())
+    if err := writer.Flush(); err != nil {
+        return err
+    }
 
-	for _, operation := range operations {
-		w.Write(operationsHandler(operation))
-	}
+    if _, err := copyToPrinter(tempFile.Name(), printer); err != nil {
+        return err
+    }
 
-	w.Flush()
-	copyToPrinter(fileName, printer)
+    return nil
 }
 
-func operationsHandler(operation Operation) []byte {
+func operationsHandler(operation Operation) ([]byte, error) {
 	switch operation.Action {
 	case "fontSize":
 		return fontSize(operation.Data)
@@ -92,31 +171,36 @@ func operationsHandler(operation Operation) []byte {
 	case "feed":
 		return feed(operation.Data)
 	case "enter":
-		return enter()
+		return enter(), nil
+	default:
+		return nil, fmt.Errorf("unsupported action: %s", operation.Action)
 	}
-
-	return []byte("")
 }
 
 func startPrinter() []byte {
 	return []byte("\x1B@")
 }
 
-func fontSize(datos string) []byte {
-	values := strings.Split(datos, ",")
-	width, err := strconv.Atoi(values[0])
-	if err != nil {
-		panic(err)
-	}
+func fontSize(datos string) ([]byte, error) {
+    values := strings.Split(datos, ",")
+    if len(values) != 2 {
+        return nil, fmt.Errorf("fontSize requires width,height")
+    }
 
-	height, err := strconv.Atoi(values[1])
-	if err != nil {
-		panic(err)
-	}
-	return []byte(fmt.Sprintf("\x1D!%c", ((width-1)<<4)|(height-1)))
+    width, err := strconv.Atoi(values[0])
+    if err != nil {
+        return nil, err
+    }
+
+    height, err := strconv.Atoi(values[1])
+    if err != nil {
+        return nil, err
+    }
+
+    return []byte(fmt.Sprintf("\x1D!%c", ((width-1)<<4)|(height-1))), nil
 }
 
-func alignment(alignment string) []byte {
+func alignment(alignment string) ([]byte, error) {
 	realAlignment := 0
 	switch alignment {
 	case "L":
@@ -125,35 +209,34 @@ func alignment(alignment string) []byte {
 		realAlignment = 1
 	case "R":
 		realAlignment = 2
+	default:
+		return nil, fmt.Errorf("alignment must be L, C or R")
 	}
-	return []byte(fmt.Sprintf("\x1Ba%c", realAlignment))
+	return []byte(fmt.Sprintf("\x1Ba%c", realAlignment)), nil
 }
 
-func text(text string) []byte {
-	//Decodes accents and ñ
-	c, e := charmap.CodePage850.NewEncoder().String(text)
-
-	if e != nil {
-		log.Fatal(e)
+func text(value string) ([]byte, error) {
+	encoded, err := charmap.CodePage850.NewEncoder().String(value)
+	if err != nil {
+		return nil, err
 	}
-
-	return []byte(c)
+	return []byte(encoded), nil
 }
 
-func boldText(enable string) []byte {
+func boldText(enable string) ([]byte, error) {
 	isEnable, err := strconv.Atoi(enable)
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
-	return []byte(fmt.Sprintf("\x1B\x45%c", isEnable))
+	return []byte(fmt.Sprintf("\x1B\x45%c", isEnable)), nil
 }
 
-func feed(nLines string) []byte {
+func feed(nLines string) ([]byte, error) {
 	n, err := strconv.Atoi(nLines)
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
-	return []byte(fmt.Sprintf("\x1Bd%c", n))
+	return []byte(fmt.Sprintf("\x1Bd%c", n)), nil
 }
 
 func enter() []byte {
