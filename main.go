@@ -10,6 +10,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 
 	"golang.org/x/text/encoding/charmap"
 )
@@ -23,6 +24,8 @@ type Body struct {
 	Operations []Operation
 	Printer    string
 }
+
+var printMu sync.Mutex
 
 func main() {
 	http.HandleFunc("/", handler)
@@ -125,37 +128,40 @@ func configCORS(w *http.ResponseWriter, r *http.Request) {
 }
 
 func print(operations []Operation, printer string) error {
-    tempFile, err := os.CreateTemp("", "escpos-*.tmp")
-    if err != nil {
-        return err
-    }
-    defer os.Remove(tempFile.Name())
-    defer tempFile.Close()
+	printMu.Lock()
+	defer printMu.Unlock()
 
-    writer := bufio.NewWriter(tempFile)
-    if _, err := writer.Write(startPrinter()); err != nil {
-        return err
-    }
+	tempFile, err := os.CreateTemp("", "escpos-*.tmp")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(tempFile.Name())
+	defer tempFile.Close()
 
-    for _, operation := range operations {
-        data, err := operationsHandler(operation)
-        if err != nil {
-            return err
-        }
-        if _, err := writer.Write(data); err != nil {
-            return err
-        }
-    }
+	writer := bufio.NewWriter(tempFile)
+	if _, err := writer.Write(startPrinter()); err != nil {
+		return err
+	}
 
-    if err := writer.Flush(); err != nil {
-        return err
-    }
+	for _, operation := range operations {
+		data, err := operationsHandler(operation)
+		if err != nil {
+			return err
+		}
+		if _, err := writer.Write(data); err != nil {
+			return err
+		}
+	}
 
-    if _, err := copyToPrinter(tempFile.Name(), printer); err != nil {
-        return err
-    }
+	if err := writer.Flush(); err != nil {
+		return err
+	}
 
-    return nil
+	if _, err := copyToPrinter(tempFile.Name(), printer); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func operationsHandler(operation Operation) ([]byte, error) {
@@ -249,13 +255,14 @@ func copyToPrinter(source, dest string) (bool, error) {
 		return false, err
 	}
 	defer fd1.Close()
-	fd2, err := os.OpenFile(dest, os.O_WRONLY|os.O_CREATE, 0644)
+
+	fd2, err := os.OpenFile(dest, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
 	if err != nil {
 		return false, err
 	}
 	defer fd2.Close()
-	_, e := io.Copy(fd2, fd1)
-	if e != nil {
+
+	if _, e := io.Copy(fd2, fd1); e != nil {
 		return false, e
 	}
 	return true, nil
