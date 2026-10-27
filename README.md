@@ -1,38 +1,38 @@
-# Servidor de impresión ESC/POS
+# ESC/POS Print Server
 
-Servidor HTTP local para enviar tickets ESC/POS a una impresora térmica instalada en Windows. Está preparado para recibir solicitudes del POS por la red y enviar los datos directamente a la cola de impresión de Windows.
+Local HTTP server for sending ESC/POS tickets to a thermal printer installed on Windows. It is designed to receive POS requests over the network and send the raw print data directly to the Windows print queue.
 
-Basado en el proyecto de [Parzibyte](https://github.com/parzibyte/ejemplos-plugin-impresoras-termicas-v2).
+Based on the work of [Parzibyte](https://github.com/parzibyte/ejemplos-plugin-impresoras-termicas-v2).
 
-## Requisitos
+## Requirements
 
-- Windows en la computadora donde está instalada la impresora.
-- Una impresora compatible con ESC/POS instalada y visible en Windows.
-- Go instalado en la computadora donde se compilará el servidor. Go no hace falta en la computadora de la impresora si se copia y ejecuta el `.exe` compilado.
+- Windows on the computer where the printer is installed.
+- A printer compatible with ESC/POS installed and visible in Windows.
+- Go installed on the computer where the server is compiled. Go is not required on the printer machine if you copy and run the compiled `.exe`.
 
-La cola local de esta instalación se llama `XP-58`. `TicketsPrinter` es el nombre compartido de Windows; los equipos POS envían solicitudes al servidor y este imprime por la cola local `XP-58`.
+The local print queue in this setup is named `XP-58`. `TicketsPrinter` is the shared Windows name; POS devices send requests to the server, which then prints to the local queue `XP-58`.
 
-## Compilar
+## Build
 
-Desde PowerShell, en la carpeta del proyecto:
+From PowerShell in the project folder:
 
 ```powershell
 go build -o escpos-print-server.exe .
 ```
 
-Se puede copiar `escpos-print-server.exe` a la computadora de la impresora. La impresora `XP-58` debe estar instalada allí con ese nombre.
+You can copy `escpos-print-server.exe` to the printer computer. The `XP-58` printer must be installed there with that name.
 
-## Configuración y arranque
+## Configuration and startup
 
-El servidor usa estas variables de entorno:
+The server uses these environment variables:
 
-| Variable | Predeterminado | Descripción |
+| Variable | Default | Description |
 | --- | --- | --- |
-| `PORT` | `8080` | Puerto HTTP del servidor. |
-| `PRINTER_NAME` | `XP-58` | Nombre de la cola de impresión de Windows. |
-| `LOG_LEVEL` | `info` | Nivel indicado al logger. |
+| `PORT` | `8080` | HTTP port for the server. |
+| `PRINTER_NAME` | `XP-58` | Name of the Windows print queue. |
+| `LOG_LEVEL` | `info` | Logging level. |
 
-Ejemplo de inicio en PowerShell:
+Example startup in PowerShell:
 
 ```powershell
 $env:PORT="8080"
@@ -41,71 +41,71 @@ $env:LOG_LEVEL="info"
 .\escpos-print-server.exe
 ```
 
-Para ejecutarlo desde el código fuente, usar `go run .` en lugar del `.exe`. La terminal debe permanecer abierta mientras el servidor esté ejecutándose. Para detenerlo, presiona `Ctrl+C`.
+To run it from source, use `go run .` instead of the `.exe`. The terminal must remain open while the server is running. To stop it, press `Ctrl+C`.
 
-## Probar una impresión local
+## Test a local print
 
-Con el servidor activo, abre otra ventana de PowerShell y envía un ticket de prueba:
+With the server running, open another PowerShell window and send a sample ticket:
 
 ```powershell
 $ticket = @{
-	operations = @(
-		@{ action = "alignment"; data = "C" }
-		@{ action = "boldText"; data = "1" }
-		@{ action = "text"; data = "PRUEBA ESC/POS" }
-		@{ action = "enter"; data = "" }
-		@{ action = "boldText"; data = "0" }
-		@{ action = "text"; data = "Conexion correcta" }
-		@{ action = "feed"; data = "2" }
-	)
+    operations = @(
+        @{ action = "alignment"; data = "C" }
+        @{ action = "boldText"; data = "1" }
+        @{ action = "text"; data = "ESC/POS TEST" }
+        @{ action = "enter"; data = "" }
+        @{ action = "boldText"; data = "0" }
+        @{ action = "text"; data = "Connection successful" }
+        @{ action = "feed"; data = "2" }
+    )
 } | ConvertTo-Json -Depth 5
 
 Invoke-RestMethod `
-	-Uri "http://localhost:8080/" `
-	-Method Post `
-	-ContentType "application/json" `
-	-Body $ticket
+    -Uri "http://localhost:8080/" `
+    -Method Post `
+    -ContentType "application/json" `
+    -Body $ticket
 ```
 
-La respuesta correcta es `status: ok`. También revisa que el ticket aparezca en la impresora y en la cola de impresión de Windows. Si hay un error, consulta los mensajes de la consola donde está corriendo el servidor.
+The expected response is `status: ok`. Also check that the ticket appears in the printer and in the Windows print queue. If there is an error, review the console output from the server process.
 
-## Conectar el POS desde otra computadora
+## Connect the POS from another computer
 
-Obtén la dirección IP local de la computadora que ejecuta el servidor. Desde el POS, envía el mismo `POST` a:
+Get the local IP address of the machine running the server. From the POS, send the same `POST` request to:
 
 ```text
-http://IP-DE-LA-PC:8080/
+http://IP-OF-THE-PC:8080/
 ```
 
-Por ejemplo, si la PC del servidor tiene la IP `192.168.1.25`, la URL será `http://192.168.1.25:8080/`. Si no hay conexión, permite el puerto configurado en el Firewall de Windows para la red privada.
+For example, if the server PC has IP `192.168.1.25`, the URL will be `http://192.168.1.25:8080/`. If the connection fails, allow the configured port through the Windows Firewall for the private network.
 
-El campo `printer` del JSON es opcional. Si se omite, el servidor utiliza `PRINTER_NAME`. Si se proporciona, ese valor debe coincidir con el nombre de una cola disponible para el proceso del servidor.
+The `printer` field in the JSON is optional. If omitted, the server uses `PRINTER_NAME`. If provided, it must match the name of a valid print queue available to the server process.
 
-## Formato de la solicitud
+## Request format
 
 ```json
 {
-	"operations": [
-		{ "action": "alignment", "data": "C" },
-		{ "action": "boldText", "data": "1" },
-		{ "action": "text", "data": "Mi tienda" },
-		{ "action": "enter", "data": "" },
-		{ "action": "boldText", "data": "0" },
-		{ "action": "separator", "data": "-" },
-		{ "action": "text", "data": "Gracias por su compra" },
-		{ "action": "feed", "data": "2" },
-		{ "action": "cut", "data": "" }
-	]
+    "operations": [
+        { "action": "alignment", "data": "C" },
+        { "action": "boldText", "data": "1" },
+        { "action": "text", "data": "My store" },
+        { "action": "enter", "data": "" },
+        { "action": "boldText", "data": "0" },
+        { "action": "separator", "data": "-" },
+        { "action": "text", "data": "Thanks for your purchase" },
+        { "action": "feed", "data": "2" },
+        { "action": "cut", "data": "" }
+    ]
 }
 ```
 
-Acciones disponibles: `text`, `enter`, `line`, `separator`, `alignment` (`L`, `C`, `R`), `boldText` (`1` para activar, `0` para desactivar), `fontSize` (`ancho,alto`), `feed` (cantidad de líneas), `cut` y `openCashDrawer`.
+Supported actions: `text`, `enter`, `line`, `separator`, `alignment` (`L`, `C`, `R`), `boldText` (`1` to enable, `0` to disable), `fontSize` (`width,height`), `feed` (line count), `cut`, and `openCashDrawer`.
 
-La respuesta exitosa es HTTP `200` con `{"status":"ok"}`. Las solicitudes inválidas responden `400`; los errores al enviar a la impresora responden `500`.
+Successful responses are HTTP `200` with `{"status":"ok"}`. Invalid requests respond with `400`; printer send failures respond with `500`.
 
-## Seguridad y operación
+## Security and operation
 
-- El servidor escucha en el puerto configurado en las interfaces de red de la PC. No lo expongas directamente a Internet.
-- Restringe el acceso al puerto en el Firewall a la red privada de la computadora; el servicio actualmente no requiere autenticación.
-- Para operación continua, configura el `.exe` para iniciar con Windows mediante el Programador de tareas o un servicio de Windows. El proyecto no instala ese servicio automáticamente.
-- Las acciones de corte y apertura del cajón dependen de que el modelo y su configuración ESC/POS las soporten.
+- The server listens on the configured port on the machine's network interfaces. Do not expose it directly to the internet.
+- Restrict access to the port in the Windows Firewall to the computer's private network; the service currently has no authentication layer.
+- For continuous operation, configure the `.exe` to start with Windows using Task Scheduler or a Windows service. The project does not install that service automatically.
+- Cut and cash drawer actions depend on the printer model and its ESC/POS configuration supporting them.
