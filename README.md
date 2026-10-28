@@ -29,8 +29,16 @@ The server uses these environment variables:
 | Variable | Default | Description |
 | --- | --- | --- |
 | `PORT` | `8080` | HTTP port for the server. |
+| `HOST` | `0.0.0.0` | Network interface to bind to. |
 | `PRINTER_NAME` | `XP-58` | Name of the Windows print queue. |
 | `LOG_LEVEL` | `info` | Logging level. |
+| `CONFIG_FILE` | `config.json` | Optional path to a JSON configuration file. |
+| `API_KEY` | unset | Optional Bearer token required for printing and status endpoints. |
+| `ALLOWED_ORIGINS` | `*` | Comma-separated CORS origins, or `*`. |
+| `READ_TIMEOUT_SECONDS` | `15` | Maximum time to read an HTTP request. |
+| `WRITE_TIMEOUT_SECONDS` | `60` | Maximum time to write an HTTP response. |
+
+The server loads `config.json` from its working directory if the file exists. Environment variables override values from the file. See [`config.example.json`](config.example.json) for the available JSON fields.
 
 Example startup in PowerShell:
 
@@ -69,6 +77,8 @@ Invoke-RestMethod `
 
 The expected response is `status: ok`. Also check that the ticket appears in the printer and in the Windows print queue. If there is an error, review the console output from the server process.
 
+The service also provides `GET /health` for a basic health check, `GET /status` for the configured printer name, and `POST /test` to print a test ticket. `/status` does not verify whether the printer is online; use `/test` to check the end-to-end print path. When `API_KEY` is configured, send it as `Authorization: Bearer <key>` to `/`, `/status`, and `/test`. The health endpoint does not require authentication.
+
 ## Connect the POS from another computer
 
 Get the local IP address of the machine running the server. From the POS, send the same `POST` request to:
@@ -106,6 +116,6 @@ Successful responses are HTTP `200` with `{"status":"ok"}`. Invalid requests res
 ## Security and operation
 
 - The server listens on the configured port on the machine's network interfaces. Do not expose it directly to the internet.
-- Restrict access to the port in the Windows Firewall to the computer's private network; the service currently has no authentication layer.
+- Restrict access to the port in the Windows Firewall to the computer's private network. You can also configure `API_KEY` to require a Bearer token for printing and status endpoints.
 - For continuous operation, configure the `.exe` to start with Windows using Task Scheduler or a Windows service. The project does not install that service automatically.
 - Cut and cash drawer actions depend on the printer model and its ESC/POS configuration supporting them.
